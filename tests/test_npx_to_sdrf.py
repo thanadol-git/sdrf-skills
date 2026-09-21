@@ -17,6 +17,7 @@ from tools.NPXtoSDRF import (
     load_npx_samples,
     map_sample_type,
     normalize_panel_name,
+    normalize_sample_matrix,
     read_npx_parquet,
     render_sdrf,
 )
@@ -106,6 +107,12 @@ class TestNpxHelpers:
 
     def test_normalize_panel_name(self):
         assert normalize_panel_name("Explore_HT") == "Explore HT"
+
+    def test_normalize_sample_matrix(self):
+        assert normalize_sample_matrix("plasma") == "blood plasma"
+        assert normalize_sample_matrix("blood plasma") == "blood plasma"
+        assert normalize_sample_matrix("serum") == "serum"
+        assert normalize_sample_matrix("not available") == "not available"
 
     def test_clinical_to_sdrf(self):
         mapped = clinical_to_sdrf(
@@ -236,4 +243,5 @@ class TestParquetIntegration:
         assert "S001" in content
         assert "female" in content
         assert "Explore HT" in content
+        assert "blood plasma" in content
         assert "NPX" in content

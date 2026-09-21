@@ -9,9 +9,13 @@ import pytest
 from tools.NPXtoSDRF import (
     ConversionDefaults,
     aggregate_samples,
+    clinical_to_sdrf,
     convert_npx_to_sdrf,
     infer_platform,
+    inspect_npx_parquet,
+    load_npx_samples,
     map_sample_type,
+    normalize_panel_name,
     read_npx_parquet,
     render_sdrf,
 )
@@ -22,35 +26,55 @@ def sample_npx_rows() -> list[dict]:
     return [
         {
             "SampleID": "S001",
-            "Sample Type": "SAMPLE",
-            "Panel": "Explore HT",
-            "PlateID": "Plate1",
+            "SampleType": "SAMPLE",
+            "Panel": "Explore_HT",
+            "PlateID": "HT053A",
             "WellID": "A01",
-            "Normalization": "PCNormalizedNPX",
-            "Panel_Lot_Nr": "LOT-123",
+            "Normalization": "Intensity",
             "OlinkID": "OID1",
             "NPX": 1.2,
+            "Gender": "Female",
+            "Patient.Age.At.Collection": "45",
+            "Primary.Diagnosis": "Normal",
+            "Patient": "P001",
+            "Race": "White",
+            "InstrumentType": "Illumina NovaSeq 6000",
         },
         {
             "SampleID": "S001",
-            "Sample Type": "SAMPLE",
-            "Panel": "Explore HT",
-            "PlateID": "Plate1",
+            "SampleType": "SAMPLE",
+            "Panel": "Explore_HT",
+            "PlateID": "HT053A",
             "WellID": "A01",
-            "Normalization": "PCNormalizedNPX",
-            "Panel_Lot_Nr": "LOT-123",
+            "Normalization": "Intensity",
             "OlinkID": "OID2",
             "NPX": 2.3,
+            "Gender": "Female",
+            "Patient.Age.At.Collection": "45",
+            "Primary.Diagnosis": "Normal",
+            "Patient": "P001",
+            "Race": "White",
+            "InstrumentType": "Illumina NovaSeq 6000",
         },
         {
             "SampleID": "NEG1",
-            "Sample Type": "NEGATIVE_CONTROL",
-            "Panel": "Explore HT",
-            "PlateID": "Plate1",
+            "SampleType": "NEGATIVE_CONTROL",
+            "Panel": "Explore_HT",
+            "PlateID": "HT053A",
             "WellID": "H12",
-            "Normalization": "PCNormalizedNPX",
+            "Normalization": "Intensity",
             "OlinkID": "OID1",
             "NPX": 0.1,
+        },
+        {
+            "SampleID": "QC1",
+            "SampleType": "SAMPLE_CONTROL",
+            "Panel": "Explore_HT",
+            "PlateID": "HT053A",
+            "WellID": "H11",
+            "Normalization": "Intensity",
+            "OlinkID": "OID1",
+            "NPX": 0.2,
         },
     ]
 
@@ -58,21 +82,45 @@ def sample_npx_rows() -> list[dict]:
 class TestNpxHelpers:
     def test_aggregate_samples(self, sample_npx_rows: list[dict]):
         samples = aggregate_samples(sample_npx_rows)
-        assert len(samples) == 2
+        assert len(samples) == 3
         by_id = {s.sample_id: s for s in samples}
         assert by_id["S001"].assay_count == 2
-        assert by_id["S001"].panel == "Explore HT"
+        assert by_id["S001"].panel == "Explore_HT"
+        assert by_id["S001"].clinical["Gender"] == "Female"
         assert by_id["NEG1"].sample_type == "NEGATIVE_CONTROL"
+        assert by_id["QC1"].sample_type == "SAMPLE_CONTROL"
 
     def test_map_sample_type(self):
         assert map_sample_type("SAMPLE") == "study sample"
         assert map_sample_type("NEGATIVE_CONTROL") == "negative control"
+        assert map_sample_type("SAMPLE_CONTROL") == "quality control sample"
         assert map_sample_type(None) == "study sample"
 
     def test_infer_platform(self):
+        assert infer_platform("Explore_HT") == "Olink Explore HT"
         assert infer_platform("Explore HT") == "Olink Explore HT"
         assert infer_platform("Target 96 Inflammation") == "Olink Target 96"
+        assert infer_platform(None, "Illumina NovaSeq 6000") == "Olink Explore HT"
         assert infer_platform("Unknown panel") is None
+
+    def test_normalize_panel_name(self):
+        assert normalize_panel_name("Explore_HT") == "Explore HT"
+
+    def test_clinical_to_sdrf(self):
+        mapped = clinical_to_sdrf(
+            {
+                "Gender": "Female",
+                "Patient.Age.At.Collection": "45",
+                "Primary.Diagnosis": "Normal",
+                "Patient": "P001",
+                "Race": "White",
+            }
+        )
+        assert mapped["characteristics[sex]"] == "female"
+        assert mapped["characteristics[age]"] == "45Y"
+        assert mapped["characteristics[disease]"] == "normal"
+        assert mapped["characteristics[individual]"] == "P001"
+        assert mapped["characteristics[ancestry category]"] == "European"
 
 
 class TestRenderSdrf:
@@ -98,6 +146,7 @@ class TestRenderSdrf:
                     templates=("human",),
                     data_file="demo.parquet",
                     bio_rep=idx,
+                    map_clinical=True,
                 )
             )
 
@@ -108,6 +157,9 @@ class TestRenderSdrf:
         assert "protein expression profiling by antibody array" in content
         assert "S001" in content
         assert "negative control" in content
+        assert "quality control sample" in content
+        assert "female" in content
+        assert "Explore HT" in content
 
 
 class TestParquetIntegration:
@@ -122,14 +174,27 @@ class TestParquetIntegration:
 
     def test_read_npx_parquet(self, parquet_file: Path):
         rows = read_npx_parquet(parquet_file)
-        assert len(rows) == 3
+        assert len(rows) == 4
         assert rows[0]["SampleID"] == "S001"
+
+    def test_load_npx_samples(self, parquet_file: Path):
+        samples, n_rows = load_npx_samples(parquet_file)
+        assert n_rows == 4
+        assert len(samples) == 3
+        by_id = {s.sample_id: s for s in samples}
+        assert by_id["S001"].clinical.get("Gender") == "Female"
+
+    def test_inspect_npx_parquet(self, parquet_file: Path):
+        report = inspect_npx_parquet(parquet_file)
+        assert report.n_rows == 4
+        assert report.n_samples == 3
+        assert "SampleID" in report.mapped_columns
+        assert "Gender" in report.mapped_columns
 
     def test_convert_npx_to_sdrf(self, parquet_file: Path):
         defaults = ConversionDefaults(
             organism="homo sapiens",
             organism_part="blood",
-            disease="normal",
             sample_matrix="plasma",
         )
         content, report = convert_npx_to_sdrf(
@@ -137,8 +202,11 @@ class TestParquetIntegration:
             templates=("human",),
             defaults=defaults,
         )
-        assert report.n_samples == 2
-        assert report.n_assay_rows == 3
+        assert report.n_samples == 3
+        assert report.n_assay_rows == 4
+        assert report.clinical_mapped == 1
         assert "affinity-proteomics" in ",".join(report.templates)
         assert "S001" in content
+        assert "female" in content
+        assert "Explore HT" in content
         assert "NPX" in content

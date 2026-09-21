@@ -249,6 +249,10 @@ def cmd_npx_to_sdrf(args: argparse.Namespace) -> int:
         argv.extend(["--sample-metadata", args.sample_metadata])
     if args.templates_dir:
         argv.extend(["--templates-dir", str(args.templates_dir)])
+    if args.inspect:
+        argv.append("--inspect")
+    if args.no_clinical:
+        argv.append("--no-clinical")
     if args.quiet:
         argv.append("-q")
     return run_cli(argv)
@@ -385,6 +389,8 @@ def main() -> None:
     p.add_argument("--data-file", default=None)
     p.add_argument("--sample-metadata", default=None)
     p.add_argument("--templates-dir", default=None, type=Path)
+    p.add_argument("--inspect", action="store_true")
+    p.add_argument("--no-clinical", action="store_true")
     p.add_argument("-q", "--quiet", action="store_true")
 
     # reconcile

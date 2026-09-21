@@ -751,11 +751,11 @@ def _build_row(
     if "human" in templates:
         row["characteristics[age]"] = merged_meta.get(
             "characteristics[age]",
-            "not applicable" if is_control else defaults.age,
+            "not available" if is_control else defaults.age,
         )
         row["characteristics[sex]"] = merged_meta.get(
             "characteristics[sex]",
-            "not applicable" if is_control else defaults.sex,
+            "not available" if is_control else defaults.sex,
         )
         if ancestry := merged_meta.get("characteristics[ancestry category]"):
             row["characteristics[ancestry category]"] = ancestry
@@ -767,6 +767,53 @@ def _build_row(
             row[key] = value
 
     return row
+
+
+def _build_logical_columns(
+    all_columns: Sequence[str],
+    used_keys: set[str],
+    template_names: Sequence[str],
+) -> list[str | tuple[str, int]]:
+    """Order columns per SDRF spec: source → characteristics → assay → comments.
+
+    Within each section, column order follows the merged template definition
+    (``all_columns``), not alphabetical sorting.
+    """
+    characteristics = [
+        col for col in all_columns
+        if col.startswith("characteristics[") and col in used_keys
+    ]
+
+    comments: list[str | tuple[str, int]] = []
+    for col in all_columns:
+        if col == "comment[sdrf template]":
+            for idx in range(len(template_names)):
+                comments.append(("comment[sdrf template]", idx))
+        elif col.startswith("comment[") and col in used_keys:
+            comments.append(col)
+
+    factors = [
+        col for col in all_columns
+        if col.startswith("factor value[") and col in used_keys
+    ]
+
+    logical: list[str | tuple[str, int]] = []
+    if "source name" in used_keys:
+        logical.append("source name")
+    logical.extend(characteristics)
+    if "assay name" in used_keys:
+        logical.append("assay name")
+    if "technology type" in used_keys:
+        logical.append("technology type")
+    logical.extend(comments)
+    logical.extend(factors)
+
+    known = {item[0] if isinstance(item, tuple) else item for item in logical}
+    extras = [col for col in all_columns if col in used_keys and col not in known]
+    logical.extend(extras)
+    remaining = sorted(used_keys - known - set(extras))
+    logical.extend(remaining)
+    return logical
 
 
 def render_sdrf(
@@ -786,16 +833,7 @@ def render_sdrf(
 
     template_values = [_template_comment(name) for name in template_names]
 
-    logical_columns: list[str | tuple[str, int]] = []
-    for col in all_columns:
-        if col == "comment[sdrf template]":
-            for idx in range(len(template_names)):
-                logical_columns.append((col, idx))
-        elif col in used_keys:
-            logical_columns.append(col)
-
-    extra_cols = sorted(used_keys - {c for c in all_columns if c != "comment[sdrf template]"})
-    logical_columns.extend(extra_cols)
+    logical_columns = _build_logical_columns(all_columns, used_keys, template_names)
 
     out_columns: list[str] = []
     for item in logical_columns:

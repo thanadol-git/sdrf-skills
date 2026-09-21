@@ -8,6 +8,7 @@ import pytest
 
 from tools.NPXtoSDRF import (
     ConversionDefaults,
+    _build_row,
     aggregate_samples,
     clinical_to_sdrf,
     convert_npx_to_sdrf,
@@ -136,8 +137,6 @@ class TestRenderSdrf:
         )
         rows = []
         for idx, sample in enumerate(samples, start=1):
-            from tools.NPXtoSDRF import _build_row
-
             rows.append(
                 _build_row(
                     sample,
@@ -160,6 +159,34 @@ class TestRenderSdrf:
         assert "quality control sample" in content
         assert "female" in content
         assert "Explore HT" in content
+
+        assay_idx = columns.index("assay name")
+        char_indices = [i for i, c in enumerate(columns) if c.startswith("characteristics[")]
+        assert char_indices, "expected characteristics columns"
+        assert max(char_indices) < assay_idx, "characteristics must precede assay name"
+
+        neg_row = next(r for r in rows if r["source name"] == "NEG1")
+        assert neg_row["characteristics[age]"] == "not available"
+        assert neg_row["characteristics[sex]"] == "not available"
+        assert "not applicable" not in neg_row["characteristics[age]"]
+
+    def test_comment_order_follows_template_not_alphabetical(self, sample_npx_rows: list[dict]):
+        samples = aggregate_samples(sample_npx_rows)
+        rows = [
+            _build_row(
+                sample,
+                defaults=ConversionDefaults(data_file="demo.parquet"),
+                metadata={},
+                templates=("human",),
+                data_file="demo.parquet",
+                bio_rep=1,
+                map_clinical=True,
+            )
+            for sample in samples[:1]
+        ]
+        _, columns = render_sdrf(rows, templates=("human",))
+        if "comment[data file]" in columns and "comment[platform]" in columns:
+            assert columns.index("comment[data file]") < columns.index("comment[platform]")
 
 
 class TestParquetIntegration:

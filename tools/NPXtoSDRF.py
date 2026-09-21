@@ -65,6 +65,17 @@ SAMPLE_TYPE_MAP: dict[str, str] = {
     "BRIDGE": "bridge",
 }
 
+# Common matrix shorthand → UBERON/BTO labels for characteristics[sample matrix].
+SAMPLE_MATRIX_MAP: dict[str, str] = {
+    "plasma": "blood plasma",
+    "blood plasma": "blood plasma",
+    "serum": "serum",
+    "csf": "cerebrospinal fluid",
+    "cerebrospinal fluid": "cerebrospinal fluid",
+    "urine": "urine",
+    "saliva": "saliva",
+}
+
 # Substrings in Panel names → comment[platform] when --platform is not set.
 PANEL_PLATFORM_HINTS: tuple[tuple[str, str], ...] = (
     ("explore ht", "Olink Explore HT"),
@@ -537,6 +548,16 @@ def _is_control_sample_type(label: str) -> bool:
     return label not in {"study sample"}
 
 
+def normalize_sample_matrix(raw: str | None) -> str | None:
+    """Map common matrix shorthand to UBERON/BTO-compatible SDRF labels."""
+    if raw is None:
+        return None
+    text = raw.strip()
+    if not text or text in {"not available", "not applicable"}:
+        return text
+    return SAMPLE_MATRIX_MAP.get(text.lower(), text)
+
+
 def _transform_sex(raw: str) -> str | None:
     lowered = raw.strip().lower()
     if lowered in {"female", "f"}:
@@ -742,11 +763,13 @@ def _build_row(
     if sample.lot_number:
         row["comment[lot number]"] = merged_meta.get("comment[lot number]", sample.lot_number)
 
-    matrix = merged_meta.get("characteristics[sample matrix]")
+    matrix = normalize_sample_matrix(merged_meta.get("characteristics[sample matrix]"))
     if matrix:
         row["characteristics[sample matrix]"] = matrix
     elif defaults.sample_matrix != "not available" and not is_control:
-        row["characteristics[sample matrix]"] = defaults.sample_matrix
+        row["characteristics[sample matrix]"] = normalize_sample_matrix(
+            defaults.sample_matrix,
+        ) or defaults.sample_matrix
 
     if "human" in templates:
         row["characteristics[age]"] = merged_meta.get(
@@ -965,7 +988,11 @@ def run_cli(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--organism", default="not available")
     parser.add_argument("--organism-part", default="not available")
     parser.add_argument("--disease", default="not available")
-    parser.add_argument("--sample-matrix", default="not available")
+    parser.add_argument(
+        "--sample-matrix",
+        default="not available",
+        help="characteristics[sample matrix] (e.g. 'blood plasma'; 'plasma' is normalized automatically)",
+    )
     parser.add_argument("--age", default="not available")
     parser.add_argument("--sex", default="not available")
     parser.add_argument(
@@ -1009,7 +1036,7 @@ def run_cli(argv: Sequence[str] | None = None) -> int:
         organism=args.organism,
         organism_part=args.organism_part,
         disease=args.disease,
-        sample_matrix=args.sample_matrix,
+        sample_matrix=normalize_sample_matrix(args.sample_matrix) or args.sample_matrix,
         age=args.age,
         sex=args.sex,
         platform=args.platform,

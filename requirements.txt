@@ -22,3 +22,6 @@ defusedxml>=0.7
 # get_article_metadata, get_pdf_by_unpaywall, search, searchClasses, getChildren).
 fastmcp>=3.4
 httpx>=0.28
+
+# Olink NPX parquet → SDRF (tools/NPXtoSDRF.py)
+pyarrow>=14.0
